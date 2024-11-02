@@ -1,11 +1,17 @@
-use crate::update_metadata::{DeltaArchiveManifest, Signatures};
+use crate::update_metadata::{
+    install_operation::Type, DeltaArchiveManifest, PartitionUpdate, Signatures,
+};
+use bzip2::bufread::BzDecoder;
 use protobuf::Message;
-use std::{fs::File, io::Read, path::Path};
+use sha2::{Digest, Sha256};
+use std::{fs::File, io::Read, os::unix::fs::FileExt, path::Path};
+use xz::bufread::XzDecoder;
 
 const PAYLOAD_HEADER_MAGIC: &str = "CrAU";
 /// From: https://android.googlesource.com/platform/system/update_engine/+/refs/heads/main/update_engine.conf
 const PAYLOAD_MAJOR_VERSION: u64 = 2;
 const HEADER_SIZE: u64 = size_of::<Header>() as u64;
+const BLOCK_SIZE: u64 = 4096;
 
 #[derive(Debug)]
 pub struct Header {
@@ -126,12 +132,80 @@ impl Payload {
         HEADER_SIZE + self.header.manifest_size + self.header.manifest_signature_size as u64
     }
 
-    pub fn read_data_blob(&mut self, offset: u64, len: u64) -> Result<Vec<u8>, std::io::Error> {
-        use std::io::{Seek, SeekFrom};
+    pub fn read_data_blob(&self, offset: u64, len: u64) -> Result<Vec<u8>, std::io::Error> {
         let mut buf = vec![0u8; len as usize];
         self.file
-            .seek(SeekFrom::Start(self.data_offset() + offset))?;
-        self.file.read_exact(&mut buf)?;
+            .read_exact_at(&mut buf, self.data_offset() + offset)?;
         Ok(buf)
+    }
+
+    pub fn partitions(&self) -> &[PartitionUpdate] {
+        self.manifest.partitions.as_slice()
+    }
+
+    fn partition(&self, partition: &str) -> Result<&PartitionUpdate, usize> {
+        self.partitions()
+            .binary_search_by_key(&partition, |p| p.partition_name())
+            .map(|idx| &self.partitions()[idx])
+    }
+
+    pub fn extract(&self, partition: &str, output_dir: &Path) -> Result<(), std::io::Error> {
+        let partition = self.partition(partition).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Partition {} not found", partition),
+            )
+        })?;
+        let name = partition.partition_name();
+        let file = File::create(output_dir.join(format!("{}.img", name)))?;
+
+        for operation in partition.operations.iter() {
+            let dst_extent = operation.dst_extents.first().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Invalid operation.dst_extents for the partition {name}"),
+                )
+            })?;
+
+            let expected_size = dst_extent.num_blocks() * BLOCK_SIZE;
+            let blob = self.read_data_blob(operation.data_offset(), operation.data_length())?;
+
+            // Verify hash for non-zero operations
+            if operation.type_() != Type::ZERO {
+                let hash = hex::encode(Sha256::digest(&blob));
+                let expected_hash = hex::encode(operation.data_sha256_hash());
+
+                if hash != expected_hash {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("SHA256 hash mismatch. Expected: {expected_hash}, Got: {hash}"),
+                    ));
+                }
+            }
+
+            let decoded = match operation.type_() {
+                Type::ZERO => vec![0u8; expected_size as usize],
+                Type::REPLACE => blob,
+                Type::REPLACE_XZ | Type::REPLACE_BZ => {
+                    let mut decoder: Box<dyn Read> = match operation.type_() {
+                        Type::REPLACE_XZ => Box::new(XzDecoder::new(blob.as_slice())),
+                        _ => Box::new(BzDecoder::new(blob.as_slice())),
+                    };
+                    let mut decoded = vec![0u8; expected_size as usize];
+                    decoder.read_exact(&mut decoded)?;
+                    decoded
+                }
+                _ => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Invalid operation type: {:?}", operation.type_()),
+                    ))
+                }
+            };
+
+            file.write_all_at(&decoded, dst_extent.start_block() * BLOCK_SIZE)?;
+        }
+
+        Ok(())
     }
 }
