@@ -3,6 +3,7 @@ use protobuf::Message;
 use std::{fs::File, io::Read, path::Path};
 
 const PAYLOAD_HEADER_MAGIC: &str = "CrAU";
+/// From: https://android.googlesource.com/platform/system/update_engine/+/refs/heads/main/update_engine.conf
 const PAYLOAD_MAJOR_VERSION: u64 = 2;
 const HEADER_SIZE: u64 = size_of::<Header>() as u64;
 
