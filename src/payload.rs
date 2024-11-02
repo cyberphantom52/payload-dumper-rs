@@ -125,4 +125,13 @@ impl Payload {
     fn data_offset(&self) -> u64 {
         HEADER_SIZE + self.header.manifest_size + self.header.manifest_signature_size as u64
     }
+
+    pub fn read_data_blob(&mut self, offset: u64, len: u64) -> Result<Vec<u8>, std::io::Error> {
+        use std::io::{Seek, SeekFrom};
+        let mut buf = vec![0u8; len as usize];
+        self.file
+            .seek(SeekFrom::Start(self.data_offset() + offset))?;
+        self.file.read_exact(&mut buf)?;
+        Ok(buf)
+    }
 }
