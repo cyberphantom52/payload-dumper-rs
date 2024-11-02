@@ -1,0 +1,12 @@
+[package]
+name = "payload-dumper-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bzip2 = { version = "0.4.4", features = ["tokio", "tokio-io"] }
+hex = "0.4.3"
+protobuf = "3.7.1"
+sha2 = "0.10.8"
+tokio = "1.41.0"
+xz = { version = "0.1.0", features = ["tokio"] }
