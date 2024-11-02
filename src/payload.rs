@@ -4,7 +4,7 @@ use crate::update_metadata::{
 use bzip2::bufread::BzDecoder;
 use protobuf::Message;
 use sha2::{Digest, Sha256};
-use std::{fs::File, io::Read, os::unix::fs::FileExt, path::Path};
+use std::{fmt::Display, fs::File, io::Read, os::unix::fs::FileExt, path::Path};
 use xz::bufread::XzDecoder;
 
 const PAYLOAD_HEADER_MAGIC: &str = "CrAU";
@@ -23,6 +23,16 @@ pub struct Header {
     manifest_size: u64,
     /// Manifest signature blob size in bytes (only in major version 2).
     manifest_signature_size: u32,
+}
+
+impl Display for Header {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Payload Version: {}\nPayload Manifest Size: {}\nPayload Manifest Signature Size: {}",
+            self.major_version, self.manifest_size, self.manifest_signature_size
+        )
+    }
 }
 
 /// Reference: https://android.googlesource.com/platform/system/update_engine/#update-payload-file-specification
@@ -130,6 +140,10 @@ impl TryFrom<&Path> for Payload {
 impl Payload {
     fn data_offset(&self) -> u64 {
         HEADER_SIZE + self.header.manifest_size + self.header.manifest_signature_size as u64
+    }
+
+    pub fn header(&self) -> &Header {
+        &self.header
     }
 
     pub fn read_data_blob(&self, offset: u64, len: u64) -> Result<Vec<u8>, std::io::Error> {
