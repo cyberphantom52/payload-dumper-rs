@@ -2,7 +2,7 @@ use crate::update_metadata::{
     install_operation::Type, DeltaArchiveManifest, PartitionUpdate, Signatures,
 };
 use bzip2::bufread::BzDecoder;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressStyle};
 use protobuf::Message;
 use sha2::{Digest, Sha256};
 use std::{fmt::Display, fs::File, io::Read, os::unix::fs::FileExt, path::Path};
@@ -37,7 +37,6 @@ impl Display for Header {
 }
 
 /// Reference: https://android.googlesource.com/platform/system/update_engine/#update-payload-file-specification
-#[derive(Debug)]
 pub struct Payload {
     /// The header of the payload.
     header: Header,
@@ -150,11 +149,26 @@ impl Payload {
         &self.header
     }
 
-    pub fn read_data_blob(&self, offset: u64, len: u64) -> Result<Vec<u8>, std::io::Error> {
+    fn read_data_blob(&self, offset: u64, len: u64) -> Result<Vec<u8>, std::io::Error> {
         let mut buf = vec![0u8; len as usize];
         self.file
             .read_exact_at(&mut buf, self.data_offset() + offset)?;
         Ok(buf)
+    }
+
+    pub fn partition_list(&self) -> Vec<String> {
+        self.partitions()
+            .iter()
+            .map(|p| p.partition_name().to_owned())
+            .collect()
+    }
+
+    pub fn print_partitions(&self) {
+        for partition in self.partitions() {
+            let name = partition.partition_name();
+            let size = HumanBytes(partition.new_partition_info.size() as u64);
+            println!("{} ({})", name, size);
+        }
     }
 
     pub fn partitions(&self) -> &[PartitionUpdate] {
