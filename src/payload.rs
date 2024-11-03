@@ -2,6 +2,7 @@ use crate::update_metadata::{
     install_operation::Type, DeltaArchiveManifest, PartitionUpdate, Signatures,
 };
 use bzip2::bufread::BzDecoder;
+use indicatif::{MultiProgress, ProgressBar};
 use protobuf::Message;
 use sha2::{Digest, Sha256};
 use std::{fmt::Display, fs::File, io::Read, os::unix::fs::FileExt, path::Path};
@@ -45,6 +46,8 @@ pub struct Payload {
     /// The signature of the first five fields. There could be multiple signatures if the key has changed.
     manifest_signature: Box<Signatures>,
     file: Box<File>,
+
+    multi_progress: MultiProgress,
 }
 
 impl TryFrom<&mut File> for Header {
@@ -133,6 +136,7 @@ impl TryFrom<&Path> for Payload {
             manifest,
             manifest_signature,
             file: Box::new(file),
+            multi_progress: MultiProgress::new(),
         })
     }
 }
@@ -172,6 +176,9 @@ impl Payload {
         })?;
         let name = partition.partition_name();
         let file = File::create(output_dir.join(format!("{}.img", name)))?;
+        let progress_bar = self
+            .multi_progress
+            .add(ProgressBar::new(partition.new_partition_info.size() as u64));
 
         for operation in partition.operations.iter() {
             let dst_extent = operation.dst_extents.first().ok_or_else(|| {
@@ -218,6 +225,8 @@ impl Payload {
             };
 
             file.write_all_at(&decoded, dst_extent.start_block() * BLOCK_SIZE)?;
+
+            progress_bar.inc(decoded.len() as u64);
         }
 
         Ok(())
