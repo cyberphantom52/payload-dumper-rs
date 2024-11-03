@@ -18,9 +18,12 @@ struct Arguments {
     partitions: Vec<String>,
 
     #[arg(short = 'o', long = "output")]
-    output: Option<String>,
+    output: Option<PathBuf>,
 
-    payload_path: String,
+    #[arg(short = 'c', long = "num_threads", default_value = "4")]
+    num_threads: usize,
+
+    payload_path: PathBuf,
 }
 
 impl Arguments {
@@ -49,10 +52,9 @@ fn main() -> Result<(), std::io::Error> {
         return Ok(());
     }
 
-    let output_dir = args.output.map_or_else(
-        || generate_output_path(payload_dir),
-        |output| Path::new(&output).to_owned(),
-    );
+    let output_dir = args
+        .output
+        .map_or_else(|| generate_output_path(payload_dir), |path| path);
     std::fs::create_dir_all(&output_dir)?;
 
     let partitions = if args.partitions.is_empty() {
@@ -60,6 +62,11 @@ fn main() -> Result<(), std::io::Error> {
     } else {
         args.partitions
     };
+
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(args.num_threads)
+        .build_global()
+        .unwrap();
 
     partitions
         .par_iter()
