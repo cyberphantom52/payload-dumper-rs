@@ -2,7 +2,7 @@ use crate::update_metadata::{
     install_operation::Type, DeltaArchiveManifest, PartitionUpdate, Signatures,
 };
 use bzip2::bufread::BzDecoder;
-use indicatif::{MultiProgress, ProgressBar};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use protobuf::Message;
 use sha2::{Digest, Sha256};
 use std::{fmt::Display, fs::File, io::Read, os::unix::fs::FileExt, path::Path};
@@ -176,9 +176,17 @@ impl Payload {
         })?;
         let name = partition.partition_name();
         let file = File::create(output_dir.join(format!("{}.img", name)))?;
-        let progress_bar = self
-            .multi_progress
-            .add(ProgressBar::new(partition.new_partition_info.size() as u64));
+        let progress_bar = self.multi_progress.add(
+            ProgressBar::new(partition.new_partition_info.size() as u64)
+                .with_message(name.to_owned())
+                .with_style(
+                    ProgressStyle::with_template(
+                        "{msg:.bold} [{bar:40.cyan/blue}] {bytes:>10}/{total_bytes:>10} \n\
+                        ETA: {eta} | Speed: {bytes_per_sec:.green}",
+                    )
+                    .unwrap(),
+                ),
+        );
 
         for operation in partition.operations.iter() {
             let dst_extent = operation.dst_extents.first().ok_or_else(|| {
