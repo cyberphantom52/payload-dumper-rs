@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 bzip2 = { version = "0.4.4", features = ["tokio", "tokio-io"] }
+clap = { version = "4.5.20", features = ["derive"] }
 hex = "0.4.3"
 indicatif = "0.17.8"
 protobuf = "3.7.1"
