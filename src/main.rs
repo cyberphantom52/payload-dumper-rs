@@ -1,4 +1,68 @@
 include!(concat!(env!("OUT_DIR"), "/protos/mod.rs"));
+use rayon::prelude::*;
+use std::path::{Path, PathBuf};
 mod payload;
+use clap::Parser;
 
-fn main() {}
+#[derive(Parser, Debug)]
+#[command(
+    author = "Inam Ul Haq",
+    version = "1.0",
+    about = "Android OTA payload dumper"
+)]
+struct Arguments {
+    #[arg(short = 'l', long = "list")]
+    list: bool,
+
+    #[arg(short = 'p', long = "partitions", value_delimiter = ',')]
+    partitions: Vec<String>,
+
+    #[arg(short = 'o', long = "output")]
+    output: Option<String>,
+
+    payload_path: String,
+}
+
+impl Arguments {
+    fn payload_path(&self) -> PathBuf {
+        Path::new(&self.payload_path).to_owned()
+    }
+}
+
+fn generate_output_path(base_dir: &Path) -> PathBuf {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap();
+    let dir_name = format!("extracted_{}", now.as_secs());
+    base_dir.join(dir_name)
+}
+
+fn main() -> Result<(), std::io::Error> {
+    let args: Arguments = Arguments::parse();
+
+    let payload_path = args.payload_path();
+    let payload_dir = payload_path.parent().unwrap();
+    let payload = payload::Payload::try_from(args.payload_path().as_path())?;
+    println!("Payload: {}", payload.header());
+    if args.list {
+        payload.print_partitions();
+        return Ok(());
+    }
+
+    let output_dir = args.output.map_or_else(
+        || generate_output_path(payload_dir),
+        |output| Path::new(&output).to_owned(),
+    );
+    std::fs::create_dir_all(&output_dir)?;
+
+    let partitions = if args.partitions.is_empty() {
+        payload.partition_list()
+    } else {
+        args.partitions
+    };
+
+    partitions
+        .par_iter()
+        .try_for_each(|partition| payload.extract(partition, output_dir.as_path()))?;
+    Ok(())
+}

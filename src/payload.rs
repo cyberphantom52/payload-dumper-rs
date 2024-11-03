@@ -2,6 +2,7 @@ use crate::update_metadata::{
     install_operation::Type, DeltaArchiveManifest, PartitionUpdate, Signatures,
 };
 use bzip2::bufread::BzDecoder;
+use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressStyle};
 use protobuf::Message;
 use sha2::{Digest, Sha256};
 use std::{fmt::Display, fs::File, io::Read, os::unix::fs::FileExt, path::Path};
@@ -36,7 +37,6 @@ impl Display for Header {
 }
 
 /// Reference: https://android.googlesource.com/platform/system/update_engine/#update-payload-file-specification
-#[derive(Debug)]
 pub struct Payload {
     /// The header of the payload.
     header: Header,
@@ -45,6 +45,8 @@ pub struct Payload {
     /// The signature of the first five fields. There could be multiple signatures if the key has changed.
     manifest_signature: Box<Signatures>,
     file: Box<File>,
+
+    multi_progress: MultiProgress,
 }
 
 impl TryFrom<&mut File> for Header {
@@ -133,6 +135,7 @@ impl TryFrom<&Path> for Payload {
             manifest,
             manifest_signature,
             file: Box::new(file),
+            multi_progress: MultiProgress::new(),
         })
     }
 }
@@ -146,11 +149,26 @@ impl Payload {
         &self.header
     }
 
-    pub fn read_data_blob(&self, offset: u64, len: u64) -> Result<Vec<u8>, std::io::Error> {
+    fn read_data_blob(&self, offset: u64, len: u64) -> Result<Vec<u8>, std::io::Error> {
         let mut buf = vec![0u8; len as usize];
         self.file
             .read_exact_at(&mut buf, self.data_offset() + offset)?;
         Ok(buf)
+    }
+
+    pub fn partition_list(&self) -> Vec<String> {
+        self.partitions()
+            .iter()
+            .map(|p| p.partition_name().to_owned())
+            .collect()
+    }
+
+    pub fn print_partitions(&self) {
+        for partition in self.partitions() {
+            let name = partition.partition_name();
+            let size = HumanBytes(partition.new_partition_info.size() as u64);
+            println!("{} ({})", name, size);
+        }
     }
 
     pub fn partitions(&self) -> &[PartitionUpdate] {
@@ -172,6 +190,17 @@ impl Payload {
         })?;
         let name = partition.partition_name();
         let file = File::create(output_dir.join(format!("{}.img", name)))?;
+        let progress_bar = self.multi_progress.add(
+            ProgressBar::new(partition.new_partition_info.size() as u64)
+                .with_message(name.to_owned())
+                .with_style(
+                    ProgressStyle::with_template(
+                        "{msg:.bold} [{bar:40.cyan/blue}] {bytes:>10}/{total_bytes:>10} \n\
+                        ETA: {eta} | Speed: {bytes_per_sec:.green}",
+                    )
+                    .unwrap(),
+                ),
+        );
 
         for operation in partition.operations.iter() {
             let dst_extent = operation.dst_extents.first().ok_or_else(|| {
@@ -218,6 +247,8 @@ impl Payload {
             };
 
             file.write_all_at(&decoded, dst_extent.start_block() * BLOCK_SIZE)?;
+
+            progress_bar.inc(decoded.len() as u64);
         }
 
         Ok(())
