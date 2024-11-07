@@ -23,6 +23,9 @@ struct Arguments {
     #[arg(short = 'c', long = "num_threads", default_value = "4")]
     num_threads: usize,
 
+    #[arg(short = 'q', long = "quiet")]
+    quiet: bool,
+
     payload_path: PathBuf,
 }
 
@@ -46,9 +49,11 @@ fn main() -> Result<(), std::io::Error> {
     let payload_path = args.payload_path();
     let payload_dir = payload_path.parent().unwrap();
     let payload = payload::Payload::try_from(args.payload_path().as_path())?;
-    println!("Payload: {}", payload.header());
+    if !args.quiet {
+        println!("Payload: {}", payload.header());
+    }
     if args.list {
-        payload.print_partitions();
+        payload.print_partitions(args.quiet);
         return Ok(());
     }
 
@@ -70,6 +75,6 @@ fn main() -> Result<(), std::io::Error> {
 
     partitions
         .par_iter()
-        .try_for_each(|partition| payload.extract(partition, output_dir.as_path()))?;
+        .try_for_each(|partition| payload.extract(partition, output_dir.as_path(), args.quiet))?;
     Ok(())
 }
