@@ -163,11 +163,13 @@ impl Payload {
             .collect()
     }
 
-    pub fn print_partitions(&self) {
-        for partition in self.partitions() {
-            let name = partition.partition_name();
-            let size = HumanBytes(partition.new_partition_info.size() as u64);
-            println!("{} ({})", name, size);
+    pub fn print_partitions(&self, quiet: bool) {
+        if !quiet {
+            for partition in self.partitions() {
+                let name = partition.partition_name();
+                let size = HumanBytes(partition.new_partition_info.size() as u64);
+                println!("{} ({})", name, size);
+            }
         }
     }
 
@@ -181,7 +183,7 @@ impl Payload {
             .map(|idx| &self.partitions()[idx])
     }
 
-    pub fn extract(&self, partition: &str, output_dir: &Path) -> Result<(), std::io::Error> {
+    pub fn extract(&self, partition: &str, output_dir: &Path, quiet: bool) -> Result<(), std::io::Error> {
         let partition = self.partition(partition).map_err(|_| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -248,9 +250,10 @@ impl Payload {
 
             file.write_all_at(&decoded, dst_extent.start_block() * BLOCK_SIZE)?;
 
-            progress_bar.inc(decoded.len() as u64);
+            if !quiet {
+                progress_bar.inc(decoded.len() as u64);
+            }
         }
-
         Ok(())
     }
 }
