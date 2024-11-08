@@ -47,6 +47,7 @@ pub struct Payload {
     file: Box<File>,
 
     multi_progress: MultiProgress,
+    quiet: bool,
 }
 
 impl TryFrom<&mut File> for Header {
@@ -136,11 +137,20 @@ impl TryFrom<&Path> for Payload {
             manifest_signature,
             file: Box::new(file),
             multi_progress: MultiProgress::new(),
+            quiet: false,
         })
     }
 }
 
 impl Payload {
+    pub fn _set_quiet(&mut self, quiet: bool) {
+        self.quiet = quiet;
+        if quiet {
+            self.multi_progress
+                .set_draw_target(indicatif::ProgressDrawTarget::hidden());
+        }
+    }
+
     fn data_offset(&self) -> u64 {
         HEADER_SIZE + self.header.manifest_size + self.header.manifest_signature_size as u64
     }
@@ -164,6 +174,10 @@ impl Payload {
     }
 
     pub fn print_partitions(&self) {
+        if self.quiet {
+            return;
+        }
+
         for partition in self.partitions() {
             let name = partition.partition_name();
             let size = HumanBytes(partition.new_partition_info.size() as u64);
