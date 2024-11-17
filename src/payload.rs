@@ -7,6 +7,7 @@ use protobuf::Message;
 use sha2::{Digest, Sha256};
 use std::{fmt::Display, fs::File, io::Read, os::unix::fs::FileExt, path::Path};
 use xz::bufread::XzDecoder;
+use zstd::Decoder;
 
 const PAYLOAD_HEADER_MAGIC: &str = "CrAU";
 /// From: https://android.googlesource.com/platform/system/update_engine/+/refs/heads/main/update_engine.conf
@@ -248,6 +249,12 @@ impl Payload {
                         Type::REPLACE_XZ => Box::new(XzDecoder::new(blob.as_slice())),
                         _ => Box::new(BzDecoder::new(blob.as_slice())),
                     };
+                    let mut decoded = vec![0u8; expected_size as usize];
+                    decoder.read_exact(&mut decoded)?;
+                    decoded
+                }
+                Type::REPLACE_ZSTD => {
+                    let mut decoder = Decoder::new(blob.as_slice())?;
                     let mut decoded = vec![0u8; expected_size as usize];
                     decoder.read_exact(&mut decoded)?;
                     decoded
