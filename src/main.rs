@@ -1,8 +1,7 @@
-include!(concat!(env!("OUT_DIR"), "/protos/mod.rs"));
+use clap::Parser;
+use payload_dumper_rs::Payload;
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
-mod payload;
-use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -27,8 +26,8 @@ struct Arguments {
 }
 
 impl Arguments {
-    fn payload_path(&self) -> PathBuf {
-        Path::new(&self.payload_path).to_owned()
+    fn payload_path(&self) -> &Path {
+        self.payload_path.as_path()
     }
 }
 
@@ -44,17 +43,16 @@ fn main() -> Result<(), std::io::Error> {
     let args: Arguments = Arguments::parse();
 
     let payload_path = args.payload_path();
-    let payload_dir = payload_path.parent().unwrap();
-    let payload = payload::Payload::try_from(args.payload_path().as_path())?;
+    /* Default Path to use if output path is not provided */
+    let default_path = generate_output_path(payload_path.parent().unwrap());
+    let payload = Payload::try_from(args.payload_path())?;
     println!("Payload: {}", payload.header());
     if args.list {
         payload.print_partitions();
         return Ok(());
     }
 
-    let output_dir = args
-        .output
-        .map_or_else(|| generate_output_path(payload_dir), |path| path);
+    let output_dir = args.output.unwrap_or_else(|| default_path);
     std::fs::create_dir_all(&output_dir)?;
 
     let partitions = if args.partitions.is_empty() {

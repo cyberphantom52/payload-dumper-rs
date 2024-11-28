@@ -1,11 +1,10 @@
-use crate::update_metadata::{
-    install_operation::Type, DeltaArchiveManifest, PartitionUpdate, Signatures,
-};
+include!(concat!(env!("OUT_DIR"), "/protos/mod.rs"));
 use bzip2::bufread::BzDecoder;
 use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressStyle};
 use protobuf::Message;
 use sha2::{Digest, Sha256};
 use std::{fmt::Display, fs::File, io::Read, os::unix::fs::FileExt, path::Path};
+use update_metadata::{install_operation::Type, DeltaArchiveManifest, PartitionUpdate, Signatures};
 use xz::bufread::XzDecoder;
 
 const PAYLOAD_HEADER_MAGIC: &str = "CrAU";
