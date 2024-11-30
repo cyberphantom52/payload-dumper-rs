@@ -162,11 +162,14 @@ cargo build --release
 ```
 
 ## License
-TODO: Add GPL-3.0 License
+
+This project is licensed under the [GPL-3.0 License](LICENSE).
+
 
 ## Credits
 
 - **Inam Ul Haq** - Author
+- Inspired by the [`payload-dumper-go`](https://github.com/ssut/payload-dumper-go) by [ssut](https://github.com/ssut).
 
 ## Contributing
 
