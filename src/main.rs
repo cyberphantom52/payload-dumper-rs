@@ -48,9 +48,11 @@ fn main() -> Result<(), std::io::Error> {
     let payload_path = args.payload_path();
     /* Default Path to use if output path is not provided */
     let default_path = generate_output_path(payload_path.parent().unwrap());
-    let payload = Payload::try_from(args.payload_path())?
-        .quiet();
-    
+    let mut payload = Payload::try_from(args.payload_path())?;
+    if args.quiet {
+        payload = payload.quiet();
+    }
+
     if !args.quiet {
         println!("Payload: {}", payload.header());
     }
