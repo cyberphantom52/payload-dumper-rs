@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use std::{fmt::Display, fs::File, io::Read, os::unix::fs::FileExt, path::Path};
 use update_metadata::{install_operation::Type, DeltaArchiveManifest, PartitionUpdate, Signatures};
 use xz::bufread::XzDecoder;
+use zstd::Decoder;
 
 const PAYLOAD_HEADER_MAGIC: &str = "CrAU";
 /// From: https://android.googlesource.com/platform/system/update_engine/+/refs/heads/main/update_engine.conf
@@ -241,9 +242,10 @@ impl Payload {
             let decoded = match operation.type_() {
                 Type::ZERO => vec![0u8; expected_size as usize],
                 Type::REPLACE => blob,
-                Type::REPLACE_XZ | Type::REPLACE_BZ => {
+                Type::REPLACE_XZ | Type::REPLACE_BZ | Type::REPLACE_ZSTD => {
                     let mut decoder: Box<dyn Read> = match operation.type_() {
                         Type::REPLACE_XZ => Box::new(XzDecoder::new(blob.as_slice())),
+                        Type::REPLACE_ZSTD => Box::new(Decoder::new(blob.as_slice())?),
                         _ => Box::new(BzDecoder::new(blob.as_slice())),
                     };
                     let mut decoded = vec![0u8; expected_size as usize];
