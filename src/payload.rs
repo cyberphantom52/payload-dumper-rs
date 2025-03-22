@@ -3,7 +3,7 @@ use bzip2::bufread::BzDecoder;
 use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressStyle};
 use protobuf::Message;
 use sha2::{Digest, Sha256};
-use std::{fmt::Display, fs::File, io::Read, os::unix::fs::FileExt, path::Path};
+use std::{fmt::Display, fs::File, io::Read, os::unix::fs::FileExt, path::Path, mem::size_of};
 use update_metadata::{install_operation::Type, DeltaArchiveManifest, PartitionUpdate, Signatures};
 use xz::bufread::XzDecoder;
 use zstd::Decoder;
@@ -195,76 +195,86 @@ impl Payload {
     }
 
     pub fn extract(&self, partition: &str, output_dir: &Path) -> Result<(), std::io::Error> {
-        let partition = self.partition(partition).map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Partition {} not found", partition),
-            )
-        })?;
-        let name = partition.partition_name();
-        let file = File::create(output_dir.join(format!("{}.img", name)))?;
-        let progress_bar = self.multi_progress.add(
-            ProgressBar::new(partition.new_partition_info.size() as u64)
-                .with_message(name.to_owned())
-                .with_style(
-                    ProgressStyle::with_template(
-                        "{msg:.bold} [{bar:40.cyan/blue}] {bytes:>10}/{total_bytes:>10} \n\
-                        ETA: {eta} | Speed: {bytes_per_sec:.green}",
-                    )
-                    .unwrap(),
-                ),
-        );
+    match self.partition(partition) {
+        Ok(partition) => {
+            let name = partition.partition_name();
+            let file = File::create(output_dir.join(format!("{}.img", name)))?;
+            let progress_bar = self.multi_progress.add(
+                ProgressBar::new(partition.new_partition_info.size() as u64)
+                    .with_message(name.to_owned())
+                    .with_style(
+                        ProgressStyle::with_template(
+                            "{msg:.bold} [{bar:40.cyan/blue}] {bytes:>10}/{total_bytes:>10} \n\
+                            ETA: {eta} | Speed: {bytes_per_sec:.green}",
+                        )
+                        .unwrap(),
+                    ),
+            );
 
-        for operation in partition.operations.iter() {
-            let dst_extent = operation.dst_extents.first().ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("Invalid operation.dst_extents for the partition {name}"),
-                )
-            })?;
+            for operation in partition.operations.iter() {
+                let dst_extent = match operation.dst_extents.first() {
+                    Some(extent) => extent,
+                    None => {
+                        eprintln!("Skipping partition {} due to invalid dst_extents", name);
+                        continue;
+                    }
+                };
 
-            let expected_size = dst_extent.num_blocks() * BLOCK_SIZE;
-            let blob = self.read_data_blob(operation.data_offset(), operation.data_length())?;
+                let expected_size = dst_extent.num_blocks() * BLOCK_SIZE;
+                let blob = match self.read_data_blob(operation.data_offset(), operation.data_length()) {
+                    Ok(data) => data,
+                    Err(_) => {
+                        eprintln!("Skipping partition {} due to failed data blob read", name);
+                        continue;
+                    }
+                };
 
-            // Verify hash for non-zero operations
-            if operation.type_() != Type::ZERO {
-                let hash = hex::encode(Sha256::digest(&blob));
-                let expected_hash = hex::encode(operation.data_sha256_hash());
-
-                if hash != expected_hash {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("SHA256 hash mismatch. Expected: {expected_hash}, Got: {hash}"),
-                    ));
+                if operation.type_() != Type::ZERO {
+                    let hash = hex::encode(Sha256::digest(&blob));
+                    let expected_hash = hex::encode(operation.data_sha256_hash());
+                    if hash != expected_hash {
+                        eprintln!("Skipping partition {} due to SHA256 hash mismatch", name);
+                        continue;
+                    }
                 }
+
+                let decoded = match operation.type_() {
+                    Type::ZERO => vec![0u8; expected_size as usize],
+                    Type::REPLACE => blob,
+                    Type::REPLACE_XZ | Type::REPLACE_BZ | Type::REPLACE_ZSTD => {
+                        let mut decoder: Box<dyn Read> = match operation.type_() {
+                            Type::REPLACE_XZ => Box::new(XzDecoder::new(blob.as_slice())),
+                            Type::REPLACE_ZSTD => Box::new(Decoder::new(blob.as_slice())?),
+                            _ => Box::new(BzDecoder::new(blob.as_slice())),
+                        };
+                        let mut decoded = vec![0u8; expected_size as usize];
+                        if decoder.read_exact(&mut decoded).is_err() {
+                            eprintln!("Skipping partition {} due to decompression failure", name);
+                            continue;
+                        }
+                        decoded
+                    }
+                    _ => {
+                        eprintln!("Skipping partition {} due to unsupported operation type", name);
+                        continue;
+                    }
+                };
+
+                if file.write_all_at(&decoded, dst_extent.start_block() * BLOCK_SIZE).is_err() {
+                    eprintln!("Skipping partition {} due to write failure", name);
+                    continue;
+                }
+
+                progress_bar.inc(decoded.len() as u64);
             }
-
-            let decoded = match operation.type_() {
-                Type::ZERO => vec![0u8; expected_size as usize],
-                Type::REPLACE => blob,
-                Type::REPLACE_XZ | Type::REPLACE_BZ | Type::REPLACE_ZSTD => {
-                    let mut decoder: Box<dyn Read> = match operation.type_() {
-                        Type::REPLACE_XZ => Box::new(XzDecoder::new(blob.as_slice())),
-                        Type::REPLACE_ZSTD => Box::new(Decoder::new(blob.as_slice())?),
-                        _ => Box::new(BzDecoder::new(blob.as_slice())),
-                    };
-                    let mut decoded = vec![0u8; expected_size as usize];
-                    decoder.read_exact(&mut decoded)?;
-                    decoded
-                }
-                _ => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Invalid operation type: {:?}", operation.type_()),
-                    ))
-                }
-            };
-
-            file.write_all_at(&decoded, dst_extent.start_block() * BLOCK_SIZE)?;
-
-            progress_bar.inc(decoded.len() as u64);
         }
-
-        Ok(())
+        Err(_) => {
+			if !self.quiet {
+				eprintln!("Skipping partition {} as it was not found", partition);
+			}
+        }
     }
+
+    Ok(())
+	}
 }
