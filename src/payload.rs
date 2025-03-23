@@ -57,6 +57,20 @@ impl TryFrom<&mut File> for Header {
     type Error = std::io::Error;
 
     fn try_from(file: &mut File) -> Result<Self, Self::Error> {
+        // Validate magic number
+        let magic = {
+            let mut buffer = [0u8; 4];
+            file.read_exact(&mut buffer)?;
+            String::from_utf8_lossy(&buffer).to_string()
+        };
+
+        if magic != PAYLOAD_HEADER_MAGIC {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Invalid android payload magic number",
+            ));
+        }
+
         // Read and validate version
         let major_version = {
             let mut buf = [0u8; 8];
@@ -86,7 +100,7 @@ impl TryFrom<&mut File> for Header {
         };
 
         Ok(Header {
-            magic_number: PAYLOAD_HEADER_MAGIC.as_bytes().try_into().unwrap(),
+            magic_number: magic.as_bytes().try_into().unwrap(),
             major_version,
             manifest_size,
             manifest_signature_size,
@@ -99,21 +113,6 @@ impl TryFrom<&Path> for Payload {
     fn try_from(path: &Path) -> Result<Self, Self::Error> {
         let mut file = File::open(path)?;
 
-        // Validate magic number
-        let magic = {
-            let mut buffer = [0u8; 4];
-            file.read_exact(&mut buffer)?;
-            String::from_utf8_lossy(&buffer).to_string()
-        };
-
-        if magic != PAYLOAD_HEADER_MAGIC {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Invalid android payload magic number",
-            ));
-        }
-
-        // Read header, manifest, and signature
         let header = Header::try_from(&mut file)?;
 
         let manifest = {
