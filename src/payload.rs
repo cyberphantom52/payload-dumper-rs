@@ -195,12 +195,12 @@ impl Payload {
     }
 
     pub fn extract(&self, partition: &str, output_dir: &Path) -> Result<(), std::io::Error> {
-        let partition = self.partition(partition).map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Partition {} not found", partition),
-            )
-        })?;
+        let partition = if let Ok(partition) = self.partition(partition) {
+            partition
+        } else {
+            println!("Partition not found: {partition}");
+            return Ok(());
+        };
         let name = partition.partition_name();
         let file = File::create(output_dir.join(format!("{}.img", name)))?;
         let progress_bar = self.multi_progress.add(
