@@ -43,9 +43,9 @@ pub struct Payload {
     /// The header of the payload.
     header: Header,
     /// The list of operations to be performed.
-    manifest: Box<DeltaArchiveManifest>,
+    manifest: DeltaArchiveManifest,
     /// The signature of the first five fields. There could be multiple signatures if the key has changed.
-    manifest_signature: Box<Signatures>,
+    manifest_signature: Signatures,
     file: Box<File>,
 
     multi_progress: MultiProgress,
@@ -125,13 +125,13 @@ impl TryFrom<&Path> for Payload {
             manifest
                 .partitions
                 .sort_by_key(|p| p.partition_name.to_owned());
-            Box::new(manifest)
+            manifest
         };
 
         let manifest_signature = {
             let mut buf = vec![0u8; header.manifest_signature_size as usize];
             file.read_exact(&mut buf)?;
-            Box::new(Signatures::decode(&buf[..])?)
+            Signatures::decode(&buf[..])?
         };
 
         Ok(Payload {
