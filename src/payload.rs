@@ -1,20 +1,22 @@
-mod update_metadata {
+pub mod update_metadata {
     include!(concat!(env!("OUT_DIR"), "/chromeos_update_engine.rs"));
 }
-use bzip2::bufread::BzDecoder;
 use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressStyle};
 use prost::Message;
-use sha2::{Digest, Sha256};
-use std::{fmt::Display, fs::File, io::Read, os::unix::fs::FileExt, path::Path};
-use update_metadata::{install_operation::Type, DeltaArchiveManifest, PartitionUpdate, Signatures};
-use xz::bufread::XzDecoder;
-use zstd::Decoder;
+use std::{
+    fmt::Display,
+    fs::File,
+    io::{BufReader, Read},
+    path::{Path, PathBuf},
+};
+use update_metadata::{DeltaArchiveManifest, PartitionUpdate, Signatures};
+
+use crate::{PartitionDecoder, PartitionReader};
 
 const PAYLOAD_HEADER_MAGIC: &str = "CrAU";
 /// From: https://android.googlesource.com/platform/system/update_engine/+/refs/heads/main/update_engine.conf
 const PAYLOAD_MAJOR_VERSION: u64 = 2;
 const HEADER_SIZE: u64 = size_of::<Header>() as u64;
-const BLOCK_SIZE: u64 = 4096;
 
 #[derive(Debug)]
 pub struct Header {
@@ -46,8 +48,8 @@ pub struct Payload {
     manifest: DeltaArchiveManifest,
     /// The signature of the first five fields. There could be multiple signatures if the key has changed.
     manifest_signature: Signatures,
-    file: Box<File>,
 
+    file_path: PathBuf,
     multi_progress: MultiProgress,
     quiet: bool,
     verify: bool,
@@ -137,7 +139,7 @@ impl TryFrom<&Path> for Payload {
             header,
             manifest,
             manifest_signature,
-            file: Box::new(file),
+            file_path: path.to_owned(),
             multi_progress: MultiProgress::new(),
             quiet: false,
             verify: true,
@@ -164,13 +166,6 @@ impl Payload {
 
     pub fn header(&self) -> &Header {
         &self.header
-    }
-
-    fn read_data_blob(&self, offset: u64, len: u64) -> Result<Vec<u8>, std::io::Error> {
-        let mut buf = vec![0u8; len as usize];
-        self.file
-            .read_exact_at(&mut buf, self.data_offset() + offset)?;
-        Ok(buf)
     }
 
     pub fn partition_list(&self) -> Vec<String> {
@@ -202,75 +197,27 @@ impl Payload {
             .map(|idx| &self.partitions()[idx])
     }
 
-    pub fn extract(&self, partition: &str, output_dir: &Path) -> Result<(), std::io::Error> {
+    pub fn extract(&self, partition: &str, output_dir: &Path) -> std::io::Result<()> {
         let partition = if let Ok(partition) = self.partition(partition) {
             partition
         } else {
             println!("Partition not found: {partition}");
             return Ok(());
         };
+
         let name = partition.partition_name.as_str();
         let file = File::create(output_dir.join(format!("{}.img", name)))?;
-        let progress_bar = self.multi_progress.add(
-            ProgressBar::new(partition.new_partition_info.as_ref().unwrap().size() as u64)
-                .with_message(name.to_owned())
-                .with_style(
-                    ProgressStyle::with_template(
-                        "{msg:.bold} [{bar:40.cyan/blue}] {bytes:>10}/{total_bytes:>10} \n\
-                        ETA: {eta} | Speed: {bytes_per_sec:.green}",
-                    )
-                    .unwrap(),
-                ),
+
+        let operations = partition.operations.clone();
+        let reader = PartitionReader::new(
+            BufReader::new(File::open(&self.file_path).unwrap()),
+            self.data_offset(),
+            operations,
         );
 
-        for operation in partition.operations.iter() {
-            let dst_extent = operation.dst_extents.first().ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("Invalid operation.dst_extents for the partition {name}"),
-                )
-            })?;
-
-            let expected_size = dst_extent.num_blocks() * BLOCK_SIZE;
-            let blob = self.read_data_blob(operation.data_offset(), operation.data_length())?;
-
-            // Verify hash for non-zero operations
-            if self.verify && operation.r#type() != Type::Zero {
-                let hash = hex::encode(Sha256::digest(&blob));
-                let expected_hash = hex::encode(operation.data_sha256_hash());
-
-                if hash != expected_hash {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("SHA256 hash mismatch. Expected: {expected_hash}, Got: {hash}"),
-                    ));
-                }
-            }
-
-            let decoded = match operation.r#type() {
-                Type::Zero => vec![0u8; expected_size as usize],
-                Type::Replace => blob,
-                Type::ReplaceXz | Type::ReplaceBz | Type::ReplaceZstd => {
-                    let mut decoder: Box<dyn Read> = match operation.r#type() {
-                        Type::ReplaceXz => Box::new(XzDecoder::new(blob.as_slice())),
-                        Type::ReplaceZstd => Box::new(Decoder::new(blob.as_slice())?),
-                        _ => Box::new(BzDecoder::new(blob.as_slice())),
-                    };
-                    let mut decoded = vec![0u8; expected_size as usize];
-                    decoder.read_exact(&mut decoded)?;
-                    decoded
-                }
-                _ => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Invalid operation type: {:?}", operation.r#type()),
-                    ))
-                }
-            };
-
-            file.write_all_at(&decoded, dst_extent.start_block() * BLOCK_SIZE)?;
-
-            progress_bar.inc(decoded.len() as u64);
+        let mut decoder = PartitionDecoder::new(file);
+        for extent in reader {
+            decoder.write_extent(extent.unwrap())?;
         }
 
         Ok(())
