@@ -119,8 +119,8 @@ impl TryFrom<&Path> for Payload {
         let manifest = {
             let mut buf = vec![0u8; header.manifest_size as usize];
             file.read_exact(&mut buf)?;
+            
             let mut manifest = DeltaArchiveManifest::decode(&buf[..])?;
-
             // Sort partitions by name for later binary search
             manifest
                 .partitions
