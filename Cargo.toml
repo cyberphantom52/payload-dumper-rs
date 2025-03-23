@@ -10,15 +10,14 @@ bzip2 = { version = "0.5.2", default-features = false, features = [
 clap = { version = "4.5.20", features = ["derive"] }
 hex = "0.4.3"
 indicatif = "0.17.11"
-protobuf = "3.7.2"
+prost = "0.13.5"
 rayon = "1.10.0"
 sha2 = "0.10.8"
 xz = { version = "0.1.0", features = ["tokio"] }
 zstd = "0.13.3"
 
 [build-dependencies]
-protobuf-codegen = "3.7.2"
-protoc-bin-vendored = "3.1.0"
+prost-build = "0.13.5"
 
 [profile.release]
 lto = true
