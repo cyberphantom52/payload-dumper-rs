@@ -1,4 +1,4 @@
-use std::io::{BufReader, Read, Result, Seek};
+use std::io::{BufReader, Read, Result, Seek, Write};
 
 use sha2::{Digest, Sha256};
 
@@ -9,6 +9,7 @@ pub struct PartitionReader<R: Read + Seek> {
     source: BufReader<R>,
     data_offset: u64,
     operations: Vec<InstallOperation>,
+    checksum: Option<Sha256>,
 }
 
 impl<R: Read + Seek> PartitionReader<R> {
@@ -17,7 +18,13 @@ impl<R: Read + Seek> PartitionReader<R> {
             source,
             data_offset,
             operations,
+            checksum: Some(Sha256::new()),
         }
+    }
+
+    pub fn without_checksum(mut self) -> Self {
+        self.checksum = None;
+        self
     }
 }
 
@@ -42,15 +49,18 @@ impl<R: Read + Seek> Iterator for PartitionReader<R> {
             .unwrap();
         self.source.read_exact(&mut buf).unwrap();
 
-        if operation.r#type() != Type::Zero {
-            let hash = hex::encode(Sha256::digest(&buf));
-            let expected_hash = hex::encode(operation.data_sha256_hash());
+        if let Some(ref mut hasher) = self.checksum {
+            if operation.r#type() != Type::Zero {
+                hasher.update(&buf);
+                let hash = hex::encode(hasher.finalize_reset());
+                let expected_hash = hex::encode(operation.data_sha256_hash());
 
-            if hash != expected_hash {
-                return Some(Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("SHA256 hash mismatch. Expected: {expected_hash}, Got: {hash}"),
-                )));
+                if hash != expected_hash {
+                    return Some(Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("SHA256 hash mismatch. Expected: {expected_hash}, Got: {hash}"),
+                    )));
+                }
             }
         }
 
