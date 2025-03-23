@@ -11,7 +11,7 @@ use std::{
 };
 use update_metadata::{DeltaArchiveManifest, PartitionUpdate, Signatures};
 
-use crate::{PartitionDecoder, PartitionReader};
+use crate::{PartitionDecoder, PartitionExtent, PartitionReader};
 
 const PAYLOAD_HEADER_MAGIC: &str = "CrAU";
 /// From: https://android.googlesource.com/platform/system/update_engine/+/refs/heads/main/update_engine.conf
@@ -47,7 +47,7 @@ pub struct Payload {
     /// The list of operations to be performed.
     manifest: DeltaArchiveManifest,
     /// The signature of the first five fields. There could be multiple signatures if the key has changed.
-    manifest_signature: Signatures,
+    _manifest_signature: Signatures,
 
     file_path: PathBuf,
     multi_progress: MultiProgress,
@@ -129,7 +129,7 @@ impl TryFrom<&Path> for Payload {
             manifest
         };
 
-        let manifest_signature = {
+        let _manifest_signature = {
             let mut buf = vec![0u8; header.manifest_signature_size as usize];
             file.read_exact(&mut buf)?;
             Signatures::decode(&buf[..])?
@@ -138,7 +138,7 @@ impl TryFrom<&Path> for Payload {
         Ok(Payload {
             header,
             manifest,
-            manifest_signature,
+            _manifest_signature,
             file_path: path.to_owned(),
             multi_progress: MultiProgress::new(),
             quiet: false,
@@ -208,6 +208,30 @@ impl Payload {
         let name = partition.partition_name.as_str();
         let file = File::create(output_dir.join(format!("{}.img", name)))?;
 
+        let total_bytes = partition
+            .new_partition_info
+            .as_ref()
+            .map(|info| info.size() as u64)
+            .unwrap_or(0);
+
+        let progress_bar = if self.quiet {
+            None
+        } else {
+            Some(
+                self.multi_progress.add(
+                    ProgressBar::new(total_bytes as u64)
+                        .with_message(name.to_owned())
+                        .with_style(
+                            ProgressStyle::with_template(
+                                "{msg:.bold} [{bar:40.cyan/blue}] {bytes:>10}/{total_bytes:>10} \n\
+                                    ETA: {eta} | Speed: {bytes_per_sec:.green}",
+                            )
+                            .unwrap(),
+                        ),
+                ),
+            )
+        };
+
         let operations = partition.operations.clone();
         let reader = PartitionReader::new(
             BufReader::new(File::open(&self.file_path).unwrap()),
@@ -217,7 +241,13 @@ impl Payload {
 
         let mut decoder = PartitionDecoder::new(file);
         for extent in reader {
-            decoder.write_extent(extent.unwrap())?;
+            let extent = extent?;
+            let bytes_written = extent.num_blocks() * PartitionExtent::BLOCK_SIZE;
+            decoder.write_extent(extent)?;
+
+            if let Some(ref pb) = progress_bar {
+                pb.inc(bytes_written);
+            }
         }
 
         Ok(())
