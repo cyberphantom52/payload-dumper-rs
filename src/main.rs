@@ -25,6 +25,9 @@ struct Arguments {
     #[arg(short = 'q', long = "quiet")]
     quiet: bool,
 
+    #[arg(long = "no-verify")]
+    no_verify: bool,
+
     payload_path: PathBuf,
 }
 
@@ -51,6 +54,9 @@ fn main() -> Result<(), std::io::Error> {
     let mut payload = Payload::try_from(args.payload_path())?;
     if args.quiet {
         payload = payload.quiet();
+    }
+    if args.no_verify {
+        payload = payload.no_verify();
     }
 
     if !args.quiet {

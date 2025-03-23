@@ -48,6 +48,7 @@ pub struct Payload {
 
     multi_progress: MultiProgress,
     quiet: bool,
+    verify: bool,
 }
 
 impl TryFrom<&mut File> for Header {
@@ -138,6 +139,7 @@ impl TryFrom<&Path> for Payload {
             file: Box::new(file),
             multi_progress: MultiProgress::new(),
             quiet: false,
+            verify: true,
         })
     }
 }
@@ -147,6 +149,11 @@ impl Payload {
         self.quiet = true;
         self.multi_progress
             .set_draw_target(indicatif::ProgressDrawTarget::hidden());
+        self
+    }
+
+    pub fn no_verify(mut self) -> Self {
+        self.verify = false;
         self
     }
 
@@ -227,7 +234,7 @@ impl Payload {
             let blob = self.read_data_blob(operation.data_offset(), operation.data_length())?;
 
             // Verify hash for non-zero operations
-            if operation.type_() != Type::ZERO {
+            if self.verify && operation.type_() != Type::ZERO {
                 let hash = hex::encode(Sha256::digest(&blob));
                 let expected_hash = hex::encode(operation.data_sha256_hash());
 
