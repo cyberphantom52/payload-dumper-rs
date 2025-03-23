@@ -1,7 +1,9 @@
-include!(concat!(env!("OUT_DIR"), "/protos/mod.rs"));
+mod update_metadata {
+    include!(concat!(env!("OUT_DIR"), "/chromeos_update_engine.rs"));
+}
 use bzip2::bufread::BzDecoder;
 use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressStyle};
-use protobuf::Message;
+use prost::Message;
 use sha2::{Digest, Sha256};
 use std::{fmt::Display, fs::File, io::Read, os::unix::fs::FileExt, path::Path};
 use update_metadata::{install_operation::Type, DeltaArchiveManifest, PartitionUpdate, Signatures};
@@ -117,19 +119,19 @@ impl TryFrom<&Path> for Payload {
         let manifest = {
             let mut buf = vec![0u8; header.manifest_size as usize];
             file.read_exact(&mut buf)?;
-            let mut manifest = DeltaArchiveManifest::parse_from_bytes(&buf)?;
+            let mut manifest = DeltaArchiveManifest::decode(&buf[..])?;
 
             // Sort partitions by name for later binary search
             manifest
                 .partitions
-                .sort_by_key(|p| p.partition_name().to_owned());
+                .sort_by_key(|p| p.partition_name.to_owned());
             Box::new(manifest)
         };
 
         let manifest_signature = {
             let mut buf = vec![0u8; header.manifest_signature_size as usize];
             file.read_exact(&mut buf)?;
-            Box::new(Signatures::parse_from_bytes(&buf)?)
+            Box::new(Signatures::decode(&buf[..])?)
         };
 
         Ok(Payload {
@@ -175,7 +177,7 @@ impl Payload {
     pub fn partition_list(&self) -> Vec<String> {
         self.partitions()
             .iter()
-            .map(|p| p.partition_name().to_owned())
+            .map(|p| p.partition_name.to_owned())
             .collect()
     }
 
@@ -184,9 +186,9 @@ impl Payload {
             return;
         }
 
-        for partition in self.partitions() {
-            let name = partition.partition_name();
-            let size = HumanBytes(partition.new_partition_info.size() as u64);
+        for partition in self.partitions().iter() {
+            let name = partition.partition_name.as_str();
+            let size = HumanBytes(partition.new_partition_info.as_ref().unwrap().size() as u64);
             println!("{} ({})", name, size);
         }
     }
@@ -197,7 +199,7 @@ impl Payload {
 
     fn partition(&self, partition: &str) -> Result<&PartitionUpdate, usize> {
         self.partitions()
-            .binary_search_by_key(&partition, |p| p.partition_name())
+            .binary_search_by_key(&partition, |p| p.partition_name.as_str())
             .map(|idx| &self.partitions()[idx])
     }
 
@@ -208,10 +210,10 @@ impl Payload {
             println!("Partition not found: {partition}");
             return Ok(());
         };
-        let name = partition.partition_name();
+        let name = partition.partition_name.as_str();
         let file = File::create(output_dir.join(format!("{}.img", name)))?;
         let progress_bar = self.multi_progress.add(
-            ProgressBar::new(partition.new_partition_info.size() as u64)
+            ProgressBar::new(partition.new_partition_info.as_ref().unwrap().size() as u64)
                 .with_message(name.to_owned())
                 .with_style(
                     ProgressStyle::with_template(
@@ -234,7 +236,7 @@ impl Payload {
             let blob = self.read_data_blob(operation.data_offset(), operation.data_length())?;
 
             // Verify hash for non-zero operations
-            if self.verify && operation.type_() != Type::ZERO {
+            if self.verify && operation.r#type() != Type::Zero {
                 let hash = hex::encode(Sha256::digest(&blob));
                 let expected_hash = hex::encode(operation.data_sha256_hash());
 
@@ -246,13 +248,13 @@ impl Payload {
                 }
             }
 
-            let decoded = match operation.type_() {
-                Type::ZERO => vec![0u8; expected_size as usize],
-                Type::REPLACE => blob,
-                Type::REPLACE_XZ | Type::REPLACE_BZ | Type::REPLACE_ZSTD => {
-                    let mut decoder: Box<dyn Read> = match operation.type_() {
-                        Type::REPLACE_XZ => Box::new(XzDecoder::new(blob.as_slice())),
-                        Type::REPLACE_ZSTD => Box::new(Decoder::new(blob.as_slice())?),
+            let decoded = match operation.r#type() {
+                Type::Zero => vec![0u8; expected_size as usize],
+                Type::Replace => blob,
+                Type::ReplaceXz | Type::ReplaceBz | Type::ReplaceZstd => {
+                    let mut decoder: Box<dyn Read> = match operation.r#type() {
+                        Type::ReplaceXz => Box::new(XzDecoder::new(blob.as_slice())),
+                        Type::ReplaceZstd => Box::new(Decoder::new(blob.as_slice())?),
                         _ => Box::new(BzDecoder::new(blob.as_slice())),
                     };
                     let mut decoded = vec![0u8; expected_size as usize];
@@ -262,7 +264,7 @@ impl Payload {
                 _ => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::Other,
-                        format!("Invalid operation type: {:?}", operation.type_()),
+                        format!("Invalid operation type: {:?}", operation.r#type()),
                     ))
                 }
             };
