@@ -21,7 +21,7 @@ const HEADER_SIZE: u64 = size_of::<Header>() as u64;
 #[derive(Debug)]
 pub struct Header {
     /// Magic string “CrAU” identifying this is an update payload.
-    magic_number: [u8; 4],
+    _magic_number: [u8; 4],
     /// Payload major version number.
     major_version: u64,
     /// Manifest size in bytes.
@@ -102,7 +102,7 @@ impl TryFrom<&mut File> for Header {
         };
 
         Ok(Header {
-            magic_number: magic.as_bytes().try_into().unwrap(),
+            _magic_number: magic.as_bytes().try_into().unwrap(),
             major_version,
             manifest_size,
             manifest_signature_size,

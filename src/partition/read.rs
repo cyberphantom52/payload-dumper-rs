@@ -1,4 +1,4 @@
-use std::io::{BufReader, Read, Result, Seek, Write};
+use std::io::{BufReader, Read, Result, Seek};
 
 use sha2::{Digest, Sha256};
 
