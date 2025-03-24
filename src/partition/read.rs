@@ -36,7 +36,7 @@ impl<R: Read + Seek> Iterator for PartitionReader<R> {
             return None;
         }
 
-        let operation = self.operations.remove(0);
+        let operation = self.operations.pop().unwrap();
         let operation_type = operation.r#type();
 
         let dst_extent = operation.dst_extents.first()?;
