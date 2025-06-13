@@ -3,7 +3,7 @@ use std::io::{BufReader, Read, Result, Seek};
 use sha2::{Digest, Sha256};
 
 use super::PartitionExtent;
-use crate::payload::update_metadata::{install_operation::Type, InstallOperation};
+use crate::update_metadata::{install_operation::Type, InstallOperation};
 
 pub struct PartitionReader<R: Read + Seek> {
     source: BufReader<R>,

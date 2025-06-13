@@ -1,6 +1,4 @@
-pub mod update_metadata {
-    include!(concat!(env!("OUT_DIR"), "/chromeos_update_engine.rs"));
-}
+use crate::update_metadata::{DeltaArchiveManifest, PartitionUpdate, Signatures};
 use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressStyle};
 use prost::Message;
 use std::{
@@ -9,7 +7,6 @@ use std::{
     io::{BufReader, Read},
     path::{Path, PathBuf},
 };
-use update_metadata::{DeltaArchiveManifest, PartitionUpdate, Signatures};
 
 use crate::{PartitionDecoder, PartitionExtent, PartitionReader};
 
@@ -120,7 +117,7 @@ impl TryFrom<&Path> for Payload {
         let manifest = {
             let mut buf = vec![0u8; header.manifest_size as usize];
             file.read_exact(&mut buf)?;
-            
+
             let mut manifest = DeltaArchiveManifest::decode(&buf[..])?;
             // Sort partitions by name for later binary search
             manifest

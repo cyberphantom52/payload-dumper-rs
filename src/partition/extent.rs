@@ -1,4 +1,4 @@
-use crate::payload::update_metadata::{install_operation::Type, Extent};
+use crate::update_metadata::{install_operation::Type, Extent};
 
 pub struct PartitionExtent {
     blob: Vec<u8>,

@@ -6,7 +6,7 @@ use xz::bufread::XzDecoder;
 use zstd::Decoder as ZstdDecoder;
 
 use super::PartitionExtent;
-use crate::payload::update_metadata::install_operation::Type;
+use crate::update_metadata::install_operation::Type;
 
 pub struct PartitionDecoder<W: Write + Seek> {
     destination: BufWriter<W>,
