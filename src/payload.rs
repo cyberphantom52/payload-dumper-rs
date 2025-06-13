@@ -235,7 +235,7 @@ impl Payload {
             partition.operations.as_slice(),
         );
 
-        let mut decoder = PartitionDecoder::new(file);
+        let mut decoder = PartitionDecoder::new(file); // TODO: Replace with &mut [u8]
         for extent in reader {
             let extent = extent?;
             let bytes_written = extent.num_blocks() * PartitionExtent::BLOCK_SIZE;
