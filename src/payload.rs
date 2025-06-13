@@ -229,16 +229,11 @@ impl Payload {
             )
         };
 
-        let operations = partition.operations.clone();
         let mut reader = PartitionReader::new(
-            BufReader::new(File::open(&self.file_path).unwrap()),
+            BufReader::new(File::open(&self.file_path).unwrap()), // TODO: Replace with &[u8]
             self.data_offset(),
-            operations,
+            partition.operations.as_slice(),
         );
-
-        if !self.verify {
-            reader = reader.without_checksum();
-        }
 
         let mut decoder = PartitionDecoder::new(file);
         for extent in reader {
