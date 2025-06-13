@@ -236,14 +236,18 @@ impl<'a> Payload<'a> {
         file.set_len(total_bytes)?;
         let mmapp = unsafe { MmapMut::map_mut(&file)? };
 
-        reader.par_iter().for_each(|extent| {
-            let ptr = mmapp.as_ptr();
-            let len = mmapp.len();
-            let mut_slice = unsafe { std::slice::from_raw_parts_mut(ptr as *mut u8, len) };
-            let mut decoder = PartitionDecoder::new(mut_slice);
-            let extent = extent.unwrap();
-            decoder.write_extent(extent).unwrap();
-        });
+        reader
+            .par_iter()
+            .try_for_each(|extent| -> Result<(), std::io::Error> {
+                let mut_slice = unsafe {
+                    let ptr = mmapp.as_ptr();
+                    let len = mmapp.len();
+                    std::slice::from_raw_parts_mut(ptr as *mut u8, len)
+                };
+                let mut decoder = PartitionDecoder::new(mut_slice);
+                let extent = extent?;
+                decoder.write_extent(extent)
+            })?;
 
         mmapp.flush()
     }
