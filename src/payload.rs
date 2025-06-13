@@ -204,28 +204,8 @@ impl<'a> Payload<'a> {
         let name = partition.partition_name.as_str();
         let file_path = output_dir.join(name).with_extension("img");
 
-        /* TODO: Enable progress bar
-        let progress_bar = self.multi_progress.add(
-            ProgressBar::new(total_bytes as u64)
-                .with_message(name.to_owned())
-                .with_style(
-                    ProgressStyle::with_template(
-                        "{msg:.bold} [{bar:40.cyan/blue}] {bytes:>10}/{total_bytes:>10} \n\
-                            ETA: {eta} | Speed: {bytes_per_sec:.green}",
-                    )
-                    .unwrap(),
-                ),
-        );
-        */
-
         let operations = partition.operations.as_slice();
         let reader = PartitionReader::new(self.data, self.data_offset(), operations);
-
-        /* TODO: Enable checksum verification
-        if !self.verify {
-            reader = reader.without_checksum();
-        }
-        */
 
         let file = OpenOptions::new()
             .create(true)
