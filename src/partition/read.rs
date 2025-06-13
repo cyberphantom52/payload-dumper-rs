@@ -1,9 +1,7 @@
-use std::io::Result;
-
-use rayon::prelude::*;
-
 use super::PartitionExtent;
 use crate::update_metadata::InstallOperation;
+use rayon::prelude::*;
+use std::io::Result;
 
 pub struct PartitionReader<'a> {
     source: &'a [u8],
@@ -22,7 +20,7 @@ impl<'a> PartitionReader<'a> {
         }
     }
 
-    pub fn par_iter(&'a self) -> impl ParallelIterator<Item = Result<PartitionExtent>> + 'a {
+    pub fn par_iter(&'a self) -> impl ParallelIterator<Item = Result<PartitionExtent<'a>>> + 'a {
         self.operations.par_iter().map(move |operation| {
             let operation_type = operation.r#type();
             let dst_extent = operation.dst_extents.first().ok_or_else(|| {
@@ -40,17 +38,13 @@ impl<'a> PartitionReader<'a> {
 
             let buf = &self.source[start..end];
 
-            Ok(PartitionExtent::new(
-                buf.to_vec(),
-                operation_type,
-                dst_extent,
-            ))
+            Ok(PartitionExtent::new(buf, operation_type, dst_extent))
         })
     }
 }
 
-impl Iterator for PartitionReader<'_> {
-    type Item = Result<PartitionExtent>;
+impl<'a> Iterator for PartitionReader<'a> {
+    type Item = Result<PartitionExtent<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let operation = self.operations.get(self.op_index)?;
@@ -70,10 +64,6 @@ impl Iterator for PartitionReader<'_> {
 
         let buf = &self.source[start..end];
 
-        Some(Ok(PartitionExtent::new(
-            buf.to_vec(),
-            operation_type,
-            dst_extent,
-        )))
+        Some(Ok(PartitionExtent::new(buf, operation_type, dst_extent)))
     }
 }

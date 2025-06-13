@@ -1,16 +1,16 @@
 use crate::update_metadata::{install_operation::Type, Extent};
 
-pub struct PartitionExtent {
-    blob: Vec<u8>,
+pub struct PartitionExtent<'a> {
+    blob: &'a [u8],
     operation_type: Type,
     start_block: u64,
     num_blocks: u64,
 }
 
-impl PartitionExtent {
+impl<'a> PartitionExtent<'a> {
     pub const BLOCK_SIZE: u64 = 4096;
 
-    pub fn new(blob: Vec<u8>, operation_type: Type, extent: &Extent) -> Self {
+    pub fn new(blob: &'a [u8], operation_type: Type, extent: &Extent) -> Self {
         let start_block = extent.start_block();
         let num_blocks = extent.num_blocks();
 
@@ -34,7 +34,11 @@ impl PartitionExtent {
         self.num_blocks
     }
 
-    pub fn into_raw(self) -> Vec<u8> {
+    pub fn as_slice(&self) -> &'a [u8] {
         self.blob
+    }
+
+    pub fn into_raw(self) -> Vec<u8> {
+        self.blob.to_vec()
     }
 }
