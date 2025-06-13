@@ -194,7 +194,12 @@ impl<'a> Payload<'a> {
             .new_partition_info
             .as_ref()
             .map(|info| info.size() as u64)
-            .unwrap_or(0);
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Partition info is missing or invalid",
+                )
+            })?;
 
         let name = partition.partition_name.as_str();
         let file_path = output_dir.join(name).with_extension("img");
