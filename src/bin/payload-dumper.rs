@@ -1,7 +1,11 @@
 use clap::Parser;
+use memmap2::Mmap;
 use payload_dumper_rs::Payload;
 use rayon::prelude::*;
-use std::path::{Path, PathBuf};
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -19,8 +23,8 @@ struct Arguments {
     #[arg(short = 'o', long = "output")]
     output: Option<PathBuf>,
 
-    #[arg(short = 'c', long = "num_threads", default_value = "4")]
-    num_threads: usize,
+    #[arg(short = 'c', long = "num_threads")]
+    num_threads: Option<usize>,
 
     #[arg(short = 'q', long = "quiet")]
     quiet: bool,
@@ -51,13 +55,11 @@ fn main() -> Result<(), std::io::Error> {
     let payload_path = args.payload_path();
     /* Default Path to use if output path is not provided */
     let default_path = generate_output_path(payload_path.parent().unwrap());
-    let mut payload = Payload::try_from(args.payload_path())?;
-    if args.quiet {
-        payload = payload.quiet();
-    }
-    if args.no_verify {
-        payload = payload.no_verify();
-    }
+    let file = File::open(payload_path)?;
+    // TODO: Is it necessary to memmap the payload file?
+    let memmap = unsafe { Mmap::map(&file)? };
+
+    let payload = Payload::try_from(&memmap[..])?;
 
     if !args.quiet {
         println!("Payload: {}", payload.header());
@@ -74,10 +76,19 @@ fn main() -> Result<(), std::io::Error> {
         payload.partition_list()
     } else {
         args.partitions
+            .iter()
+            .map(|p| p.as_str())
+            .collect::<Vec<&str>>()
     };
 
+    let num_threads = args.num_threads.unwrap_or_else(|| {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    });
+
     rayon::ThreadPoolBuilder::new()
-        .num_threads(args.num_threads)
+        .num_threads(num_threads)
         .build_global()
         .unwrap();
 

@@ -1,68 +1,68 @@
-use std::io::{BufReader, Read, Result, Seek};
-
-use sha2::{Digest, Sha256};
-
 use super::PartitionExtent;
-use crate::payload::update_metadata::{install_operation::Type, InstallOperation};
+use crate::update_metadata::InstallOperation;
+use rayon::prelude::*;
+use std::io::Result;
 
-pub struct PartitionReader<R: Read + Seek> {
-    source: BufReader<R>,
+pub struct PartitionReader<'a> {
+    source: &'a [u8],
     data_offset: u64,
-    operations: Vec<InstallOperation>,
-    checksum: Option<Sha256>,
+    operations: &'a [InstallOperation],
+    op_index: usize,
 }
 
-impl<R: Read + Seek> PartitionReader<R> {
-    pub fn new(source: BufReader<R>, data_offset: u64, operations: Vec<InstallOperation>) -> Self {
+impl<'a> PartitionReader<'a> {
+    pub fn new(source: &'a [u8], data_offset: u64, operations: &'a [InstallOperation]) -> Self {
         Self {
             source,
             data_offset,
             operations,
-            checksum: Some(Sha256::new()),
+            op_index: 0,
         }
     }
 
-    pub fn without_checksum(mut self) -> Self {
-        self.checksum = None;
-        self
+    pub fn par_iter(&'a self) -> impl ParallelIterator<Item = Result<PartitionExtent<'a>>> + 'a {
+        self.operations.par_iter().map(move |operation| {
+            let operation_type = operation.r#type();
+            let dst_extent = operation.dst_extents.first().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "No destination extent")
+            })?;
+            let start = (self.data_offset + operation.data_offset()) as usize;
+            let end = start + operation.data_length() as usize;
+
+            if end > self.source.len() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "Operation exceeds source bounds",
+                ));
+            }
+
+            let buf = &self.source[start..end];
+
+            Ok(PartitionExtent::new(buf, operation_type, dst_extent))
+        })
     }
 }
 
-impl<R: Read + Seek> Iterator for PartitionReader<R> {
-    type Item = Result<PartitionExtent>;
+impl<'a> Iterator for PartitionReader<'a> {
+    type Item = Result<PartitionExtent<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.operations.is_empty() {
-            return None;
-        }
-
-        let operation = self.operations.pop().unwrap();
+        let operation = self.operations.get(self.op_index)?;
+        self.op_index += 1;
         let operation_type = operation.r#type();
 
         let dst_extent = operation.dst_extents.first()?;
-        let mut buf = vec![0u8; operation.data_length() as usize];
+        let start = (self.data_offset + operation.data_offset()) as usize;
+        let end = start + operation.data_length() as usize;
 
-        self.source
-            .seek(std::io::SeekFrom::Start(
-                self.data_offset + operation.data_offset(),
-            ))
-            .unwrap();
-        self.source.read_exact(&mut buf).unwrap();
-
-        if let Some(ref mut hasher) = self.checksum {
-            if operation.r#type() != Type::Zero {
-                hasher.update(&buf);
-                let hash = hex::encode(hasher.finalize_reset());
-                let expected_hash = hex::encode(operation.data_sha256_hash());
-
-                if hash != expected_hash {
-                    return Some(Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("SHA256 hash mismatch. Expected: {expected_hash}, Got: {hash}"),
-                    )));
-                }
-            }
+        if end > self.source.len() {
+            return Some(Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Operation exceeds source bounds",
+            )));
         }
+
+        let buf = &self.source[start..end];
 
         Some(Ok(PartitionExtent::new(buf, operation_type, dst_extent)))
     }
